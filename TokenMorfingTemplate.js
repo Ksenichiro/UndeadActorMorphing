@@ -316,12 +316,26 @@ async function applyMorph(config, createActors) {
   }
 
   const processedActors = new Set();
-  let count = 0;
+  let morphedCount = 0;
+  let createdCount = 0;
 
   for (const tokenId of confirmedIds) {
     const token = canvas.tokens.get(tokenId);
     const actor = token?.actor;
     if (!actor) continue;
+
+    if (createActors) {
+      try {
+        await createMorphedActor(actor, config);
+        createdCount++;
+      } catch (err) {
+        console.error(`Failed to create ${config.successLabel.toLowerCase()} copy for ${actor.name}`, err);
+        ui.notifications.error(`Failed to create ${config.successLabel.toLowerCase()} copy for ${actor.name}. Check console.`);
+      }
+    }
+
+    if (processedActors.has(actor.uuid)) continue;
+    processedActors.add(actor.uuid);
 
     const morphedName = buildMorphedName(actor.name, config.nameSuffix);
 
@@ -339,24 +353,19 @@ async function applyMorph(config, createActors) {
       ui.notifications.error(`Failed to rename token ${token.name}. Check console.`);
     }
 
-    if (processedActors.has(actor.uuid)) continue;
-    processedActors.add(actor.uuid);
-
     try {
-      if (createActors) {
-        await createMorphedActor(actor, config);
-      } else {
-        await config.handler(actor);
-      }
-      count++;
+      await config.handler(actor);
+      morphedCount++;
     } catch (err) {
       console.error(`Failed to ${config.successLabel.toLowerCase()} ${actor.name}`, err);
       ui.notifications.error(`Failed to ${config.successLabel.toLowerCase()} ${actor.name}. Check console.`);
     }
   }
 
-  const modeLabel = createActors ? "Created" : config.successLabel;
-  ui.notifications.info(`${modeLabel} ${count} actor(s).`);
+  const summary = createActors
+    ? `${config.successLabel} ${morphedCount} actor(s) and created ${createdCount} morphed actor copy/copies.`
+    : `${config.successLabel} ${morphedCount} actor(s).`;
+  ui.notifications.info(summary);
 }
 
 const content = `
