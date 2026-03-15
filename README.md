@@ -58,7 +58,8 @@ If `Create Actors` is enabled, the macro creates a new actor in the `Zombies` fo
 ## Template resourses
 
 This macro was created for templates of Conflux Creatures skeletons and zombies with idea to use them in pair with Summon Undead from Spells that don't Suck compendium.
-Check out Conflux Creature work at patreon: https://www.patreon.com/c/confluxcreatures/
-Skeleton template: https://homebrewery.naturalcrit.com/share/wwx8AHLNOu0U
-Zombie template: https://homebrewery.naturalcrit.com/share/1H-v56SCMOyK58yUUoTL_SiTL2PGGqqXd-cAwwkaCLE-n
-STDS: https://www.gmbinder.com/share/-NR0OWlW60yv2EfA3qQp
+
+- Conflux Creatures Patreon: https://www.patreon.com/c/confluxcreatures/
+- Skeleton template: https://homebrewery.naturalcrit.com/share/wwx8AHLNOu0U
+- Zombie template: https://homebrewery.naturalcrit.com/share/1H-v56SCMOyK58yUUoTL_SiTL2PGGqqXd-cAwwkaCLE-n
+- STDS: https://www.gmbinder.com/share/-NR0OWlW60yv2EfA3qQp
