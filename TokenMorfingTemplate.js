@@ -17,6 +17,22 @@ function mergeArray(existing, additions) {
   return uniq([...(existing ?? []), ...additions]);
 }
 
+function mergeSpecialSenseLines(currentText, additions) {
+  const lines = (currentText ?? "")
+    .split("\n")
+    .map(s => s.trim())
+    .filter(Boolean);
+
+  for (const addition of additions) {
+    const needle = addition.toLowerCase().split(":")[0];
+    if (!lines.some(line => line.toLowerCase().includes(needle))) {
+      lines.push(addition);
+    }
+  }
+
+  return lines.join("\n");
+}
+
 async function skeletifyActor(actor) {
   const updates = {};
 
@@ -41,24 +57,101 @@ async function skeletifyActor(actor) {
   const currentSpecialSenses = foundry.utils.getProperty(actor, "system.attributes.senses.special") ?? "";
   const bonesenseText = "Bonesense: The skeleton can pinpoint, by scent, the location of any creature with bones within 20 feet of it.";
   const undeadNeedsText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
-
-  const specialLines = currentSpecialSenses
-    .split("\n")
-    .map(s => s.trim())
-    .filter(Boolean);
-
-  if (!specialLines.some(s => s.toLowerCase().includes("bonesense"))) {
-    specialLines.push(bonesenseText);
-  }
-
-  if (!specialLines.some(s => s.toLowerCase().includes("no longer requires air"))) {
-    specialLines.push(undeadNeedsText);
-  }
-
-  updates["system.attributes.senses.special"] = specialLines.join("\n");
+  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [
+    bonesenseText,
+    undeadNeedsText
+  ]);
 
   await actor.update(updates);
 }
+
+async function zombifyActor(actor) {
+  const updates = {};
+
+  updates["system.details.type.value"] = "undead";
+  updates["system.details.alignment"] = "neutral evil";
+  updates["system.abilities.int.value"] = 3;
+  updates["system.abilities.wis.value"] = 6;
+  updates["system.abilities.cha.value"] = 5;
+  updates["system.attributes.hp.formula"] = "3d8 + 9";
+
+  const currentDI = foundry.utils.getProperty(actor, "system.traits.di.value") ?? [];
+  updates["system.traits.di.value"] = mergeArray(currentDI, ["poison"]);
+
+  const currentCI = foundry.utils.getProperty(actor, "system.traits.ci.value") ?? [];
+  updates["system.traits.ci.value"] = mergeArray(currentCI, ["poisoned"]);
+
+  const currentDarkvision = foundry.utils.getProperty(actor, "system.attributes.senses.darkvision") ?? 0;
+  updates["system.attributes.senses.darkvision"] = Math.max(currentDarkvision, 60);
+
+  const currentSpecialSenses = foundry.utils.getProperty(actor, "system.attributes.senses.special") ?? "";
+  const undeadFortitudeText = "Undead Fortitude: If damage reduces the zombie to 0 hit points, it makes a Constitution save to drop to 1 hit point instead, unless the damage is radiant or from a critical hit.";
+  const undeadNeedsText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
+  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [
+    undeadFortitudeText,
+    undeadNeedsText
+  ]);
+
+  await actor.update(updates);
+}
+
+function isActorFolder(folder) {
+  return folder?.type === "Actor";
+}
+
+function findActorFolder(name, parentFolder = null) {
+  return game.folders.find(folder => {
+    if (!isActorFolder(folder)) return false;
+    if (folder.name !== name) return false;
+
+    const folderParentId = folder.folder?.id ?? folder.folder ?? null;
+    const targetParentId = parentFolder?.id ?? null;
+    return folderParentId === targetParentId;
+  });
+}
+
+async function ensureActorFolder(name, parentFolder = null) {
+  const existing = findActorFolder(name, parentFolder);
+  if (existing) return existing;
+
+  return Folder.create({
+    name,
+    type: "Actor",
+    folder: parentFolder?.id ?? null
+  });
+}
+
+async function createMorphedActor(sourceActor, config) {
+  const targetFolder = await ensureActorFolder(config.folderName);
+  const actorData = sourceActor.toObject();
+
+  delete actorData._id;
+  actorData.folder = targetFolder.id;
+  actorData.name = `${sourceActor.name} ${config.nameSuffix}`;
+
+  if (actorData.prototypeToken) {
+    actorData.prototypeToken.name = actorData.name;
+  }
+
+  const createdActor = await Actor.create(actorData);
+  await config.handler(createdActor);
+  return createdActor;
+}
+
+const MORPH_CONFIG = {
+  skeletify: {
+    folderName: "Skeletons",
+    nameSuffix: "Skeleton",
+    handler: skeletifyActor,
+    successLabel: "Skeletified"
+  },
+  zombify: {
+    folderName: "Zombies",
+    nameSuffix: "Zombie",
+    handler: zombifyActor,
+    successLabel: "Zombified"
+  }
+};
 
 const initiallyTargeted = new Set(game.user.targets.map(t => t.id));
 const state = new Map(selected.map(t => [t.id, initiallyTargeted.has(t.id)]));
@@ -104,12 +197,12 @@ function refresh(html) {
   }
 }
 
-async function applyToConfirmedTokens(handler, successLabel) {
+async function applyMorph(config, createActors) {
   if (!confirmedIds.length) {
     return ui.notifications.warn("Select at least one token first.");
   }
 
-  const updatedActors = new Set();
+  const processedActors = new Set();
   let count = 0;
 
   for (const tokenId of confirmedIds) {
@@ -117,19 +210,24 @@ async function applyToConfirmedTokens(handler, successLabel) {
     const actor = token?.actor;
     if (!actor) continue;
 
-    if (updatedActors.has(actor.uuid)) continue;
-    updatedActors.add(actor.uuid);
+    if (processedActors.has(actor.uuid)) continue;
+    processedActors.add(actor.uuid);
 
     try {
-      await handler(actor);
+      if (createActors) {
+        await createMorphedActor(actor, config);
+      } else {
+        await config.handler(actor);
+      }
       count++;
     } catch (err) {
-      console.error(`Failed to ${successLabel.toLowerCase()} ${actor.name}`, err);
-      ui.notifications.error(`Failed to ${successLabel.toLowerCase()} ${actor.name}. Check console.`);
+      console.error(`Failed to ${config.successLabel.toLowerCase()} ${actor.name}`, err);
+      ui.notifications.error(`Failed to ${config.successLabel.toLowerCase()} ${actor.name}. Check console.`);
     }
   }
 
-  ui.notifications.info(`${successLabel} ${count} actor(s).`);
+  const modeLabel = createActors ? "Created" : config.successLabel;
+  ui.notifications.info(`${modeLabel} ${count} actor(s).`);
 }
 
 const content = `
@@ -233,6 +331,10 @@ const content = `
   </div>
 
   <div class="template-stage" data-role="template-stage" data-ready="false">
+    <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+      <input type="checkbox" data-role="create-actors" />
+      <span>Create Actors</span>
+    </label>
 
     <div class="template-actions">
       <button type="button" data-template-action="skeletify">Skeletify</button>
@@ -260,11 +362,13 @@ new Dialog({
     });
 
     html[0].querySelector("[data-template-action='skeletify']")?.addEventListener("click", async () => {
-      await applyToConfirmedTokens(skeletifyActor, "Skeletified");
+      const createActors = html[0].querySelector("[data-role='create-actors']")?.checked ?? false;
+      await applyMorph(MORPH_CONFIG.skeletify, createActors);
     });
 
     html[0].querySelector("[data-template-action='zombify']")?.addEventListener("click", async () => {
-      ui.notifications.info("Zombify is not implemented yet.");
+      const createActors = html[0].querySelector("[data-role='create-actors']")?.checked ?? false;
+      await applyMorph(MORPH_CONFIG.zombify, createActors);
     });
 
     refresh(html);
