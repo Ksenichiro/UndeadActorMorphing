@@ -1,11 +1,8 @@
 # Token Morphing Macro
 
 ## Showcase
-
-[Download or open the showcase video](./showcase.webm)
-
-<video src="./showcase.webm" controls muted playsinline></video>
-
+<video src="./showcase.webm" controls="controls" muted="muted" style="max-width: 100%; height: auto;">
+</video>
 ## Last Tested Specs
 
 - Foundry VTT: `13.351`
