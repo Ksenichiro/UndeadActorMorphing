@@ -83,6 +83,13 @@ function buildUtilityActivity(name, options = {}) {
   };
 }
 
+function buildMorphedName(name, suffix) {
+  const escapedSuffixes = Object.values(MORPH_CONFIG)
+    .map(config => config.nameSuffix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const suffixPattern = new RegExp(`\\s+(?:${escapedSuffixes.join("|")})$`, "i");
+  return `${name.replace(suffixPattern, "")} ${suffix}`;
+}
+
 async function ensureFeature(actor, name, description, options = {}) {
   const descriptionHtml = buildFeatureDescription(description, options.inlineRollFormula);
 
@@ -233,7 +240,7 @@ async function createMorphedActor(sourceActor, config) {
 
   delete actorData._id;
   actorData.folder = targetFolder.id;
-  actorData.name = `${sourceActor.name} ${config.nameSuffix}`;
+  actorData.name = buildMorphedName(sourceActor.name, config.nameSuffix);
 
   if (actorData.prototypeToken) {
     actorData.prototypeToken.name = actorData.name;
@@ -315,6 +322,22 @@ async function applyMorph(config, createActors) {
     const token = canvas.tokens.get(tokenId);
     const actor = token?.actor;
     if (!actor) continue;
+
+    const morphedName = buildMorphedName(actor.name, config.nameSuffix);
+
+    try {
+      await actor.update({ name: morphedName });
+    } catch (err) {
+      console.error(`Failed to rename actor ${actor.name}`, err);
+      ui.notifications.error(`Failed to rename actor ${actor.name}. Check console.`);
+    }
+
+    try {
+      await token.document.update({ name: morphedName });
+    } catch (err) {
+      console.error(`Failed to rename token ${token.name}`, err);
+      ui.notifications.error(`Failed to rename token ${token.name}. Check console.`);
+    }
 
     if (processedActors.has(actor.uuid)) continue;
     processedActors.add(actor.uuid);
