@@ -1,8 +1,7 @@
 # Token Morphing Macro
 
 ## Showcase
-<video src="./showcase.webm" controls="controls" muted="muted" style="max-width: 100%; height: auto;">
-</video>
+![Showcase](./showcase.gif)
 ## Last Tested Specs
 
 - Foundry VTT: `13.351`
