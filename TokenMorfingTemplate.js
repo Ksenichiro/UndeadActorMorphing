@@ -33,19 +33,96 @@ function mergeSpecialSenseLines(currentText, additions) {
   return lines.join("\n");
 }
 
-async function ensureFeature(actor, name, description) {
-  const existing = actor.items.find(item => item.type === "feat" && item.name === name);
-  if (existing) return existing;
+function buildFeatureDescription(description, inlineRollFormula = "") {
+  const descriptionParts = [
+    description.includes("<p>") ? description : `<p>${description}</p>`
+  ];
 
-  const [created] = await actor.createEmbeddedDocuments("Item", [{
+  if (inlineRollFormula) {
+    descriptionParts.push(`<p><strong>Roll:</strong> [[/r ${inlineRollFormula}]]</p>`);
+  }
+
+  return descriptionParts.join("");
+}
+
+function buildUtilityActivity(name, options = {}) {
+  if (!options.formula) return undefined;
+
+  const activityId = foundry.utils.randomID();
+  return {
+    [activityId]: {
+      _id: activityId,
+      type: "utility",
+      name: options.activityName ?? name,
+      activation: {
+        type: options.activationType ?? "special",
+        value: 1,
+        condition: ""
+      },
+      description: {
+        chatFlavor: options.chatFlavor ?? ""
+      },
+      consumption: {
+        targets: [],
+        scaling: {
+          allowed: false,
+          max: ""
+        }
+      },
+      uses: {
+        spent: 0,
+        max: "",
+        recovery: []
+      },
+      roll: {
+        formula: options.formula,
+        prompt: false,
+        visible: true
+      }
+    }
+  };
+}
+
+async function ensureFeature(actor, name, description, options = {}) {
+  const descriptionHtml = buildFeatureDescription(description, options.inlineRollFormula);
+
+  const itemData = {
     name,
     type: "feat",
     system: {
       description: {
-        value: `<p>${description}</p>`
+        value: descriptionHtml
       }
     }
-  }]);
+  };
+
+  const activities = buildUtilityActivity(name, options);
+  if (activities) {
+    itemData.system.activities = activities;
+  }
+
+  if (options.activationType) {
+    itemData.system.activation = {
+      type: options.activationType,
+      cost: 1
+    };
+  }
+
+  if (options.actionType) {
+    itemData.system.actionType = options.actionType;
+  }
+
+  if (options.formula) {
+    itemData.system.formula = options.formula;
+  }
+
+  const existing = actor.items.find(item => item.type === "feat" && item.name === name);
+  if (existing) {
+    await existing.update(itemData);
+    return existing;
+  }
+
+  const [created] = await actor.createEmbeddedDocuments("Item", [itemData]);
 
   return created;
 }
@@ -73,11 +150,11 @@ async function skeletifyActor(actor) {
 
   const currentSpecialSenses = foundry.utils.getProperty(actor, "system.attributes.senses.special") ?? "";
   const bonesenseText = "Bonesense: The skeleton can pinpoint, by scent, the location of any creature with bones within 20 feet of it.";
-  const undeadNeedsText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
+  const undeadNatureText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
   updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [bonesenseText]);
 
   await actor.update(updates);
-  await ensureFeature(actor, "Undead Nature", undeadNeedsText);
+  await ensureFeature(actor, "Undead Nature", undeadNatureText);
 }
 
 async function zombifyActor(actor) {
@@ -87,25 +164,41 @@ async function zombifyActor(actor) {
   updates["system.details.alignment"] = "neutral evil";
   updates["system.abilities.int.value"] = 3;
   updates["system.abilities.wis.value"] = 6;
-  updates["system.abilities.cha.value"] = 5;
-  updates["system.attributes.hp.formula"] = "3d8 + 9";
+  updates["system.abilities.cha.value"] = 3;
 
   const currentDI = foundry.utils.getProperty(actor, "system.traits.di.value") ?? [];
   updates["system.traits.di.value"] = mergeArray(currentDI, ["poison"]);
 
   const currentCI = foundry.utils.getProperty(actor, "system.traits.ci.value") ?? [];
-  updates["system.traits.ci.value"] = mergeArray(currentCI, ["poisoned"]);
+  updates["system.traits.ci.value"] = mergeArray(currentCI, ["exhaustion", "poisoned"]);
 
   const currentDarkvision = foundry.utils.getProperty(actor, "system.attributes.senses.darkvision") ?? 0;
   updates["system.attributes.senses.darkvision"] = Math.max(currentDarkvision, 60);
 
   const currentSpecialSenses = foundry.utils.getProperty(actor, "system.attributes.senses.special") ?? "";
-  const undeadFortitudeText = "Undead Fortitude: If damage reduces the zombie to 0 hit points, it makes a Constitution save to drop to 1 hit point instead, unless the damage is radiant or from a critical hit.";
-  const undeadNeedsText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
-  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [undeadFortitudeText]);
+  const bonesenseText = "Bonesense: The zombie can pinpoint, by scent, the location of any creature with bones within 20 feet of it.";
+  const undeadFortitudeText = "Undead Fortitude. When the zombie is reduced to 0 Hit Points by a source other than Radiant damage or a Critical Hit, roll a d6.</p><p>On a 3+, the zombie regains 1 Hit Point at the start of its next turn, unless it takes any other damage before then.";
+  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [bonesenseText]);
+
+  if (foundry.utils.hasProperty(actor, "system.traits.languages.value")) {
+    updates["system.traits.languages.value"] = [];
+  }
+
+  if (foundry.utils.hasProperty(actor, "system.traits.languages.custom")) {
+    updates["system.traits.languages.custom"] = "";
+  }
+
+  if (foundry.utils.hasProperty(actor, "system.attributes.spellcasting")) {
+    updates["system.attributes.spellcasting"] = "";
+  }
 
   await actor.update(updates);
-  await ensureFeature(actor, "Undead Nature", undeadNeedsText);
+  await ensureFeature(actor, "Undead Fortitude", undeadFortitudeText, {
+    activationType: "special",
+    actionType: "util",
+    formula: "1d6",
+    inlineRollFormula: "1d6"
+  });
 }
 
 function isActorFolder(folder) {
