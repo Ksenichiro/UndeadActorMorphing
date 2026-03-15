@@ -33,6 +33,23 @@ function mergeSpecialSenseLines(currentText, additions) {
   return lines.join("\n");
 }
 
+async function ensureFeature(actor, name, description) {
+  const existing = actor.items.find(item => item.type === "feat" && item.name === name);
+  if (existing) return existing;
+
+  const [created] = await actor.createEmbeddedDocuments("Item", [{
+    name,
+    type: "feat",
+    system: {
+      description: {
+        value: `<p>${description}</p>`
+      }
+    }
+  }]);
+
+  return created;
+}
+
 async function skeletifyActor(actor) {
   const updates = {};
 
@@ -57,12 +74,10 @@ async function skeletifyActor(actor) {
   const currentSpecialSenses = foundry.utils.getProperty(actor, "system.attributes.senses.special") ?? "";
   const bonesenseText = "Bonesense: The skeleton can pinpoint, by scent, the location of any creature with bones within 20 feet of it.";
   const undeadNeedsText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
-  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [
-    bonesenseText,
-    undeadNeedsText
-  ]);
+  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [bonesenseText]);
 
   await actor.update(updates);
+  await ensureFeature(actor, "Undead Nature", undeadNeedsText);
 }
 
 async function zombifyActor(actor) {
@@ -87,12 +102,10 @@ async function zombifyActor(actor) {
   const currentSpecialSenses = foundry.utils.getProperty(actor, "system.attributes.senses.special") ?? "";
   const undeadFortitudeText = "Undead Fortitude: If damage reduces the zombie to 0 hit points, it makes a Constitution save to drop to 1 hit point instead, unless the damage is radiant or from a critical hit.";
   const undeadNeedsText = "Undead Nature: The creature no longer requires air, food, drink, or sleep.";
-  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [
-    undeadFortitudeText,
-    undeadNeedsText
-  ]);
+  updates["system.attributes.senses.special"] = mergeSpecialSenseLines(currentSpecialSenses, [undeadFortitudeText]);
 
   await actor.update(updates);
+  await ensureFeature(actor, "Undead Nature", undeadNeedsText);
 }
 
 function isActorFolder(folder) {
